@@ -468,7 +468,7 @@ def test_overview_payload_carries_run_metadata() -> None:
     assert payload["personas"] == []
     assert payload["now"].startswith("2026-01-01")
 
-def test_page_api_registers_exactly_three_routes() -> None:
+def test_page_api_registers_expected_routes() -> None:
     from astrbot_plugin_matrix_companion import page_api as page_mod
 
     recorded: list[tuple[str, tuple[str, ...]]] = []
@@ -485,6 +485,7 @@ def test_page_api_registers_exactly_three_routes() -> None:
     assert routes[f"{prefix}/state"] == ("GET",)
     assert routes[f"{prefix}/trigger"] == ("POST",)
     assert routes[f"{prefix}/test-send"] == ("POST",)
+    assert routes[f"{prefix}/clear-profile"] == ("POST",)
 
 
 def test_page_api_degrades_without_web_api_support() -> None:
@@ -1087,3 +1088,57 @@ def test_parse_reconcile_payload_parses_profile_updates() -> None:
     updates = patch["profile_updates"]
     # 缺 source 的条目在解析阶段就丢掉
     assert [item["key"] for item in updates] == ["address_as", "interests"]
+
+def test_profile_view_reports_content() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    empty = user_mod.profile_view(user)
+    assert empty["has_content"] is False
+
+    user_mod.apply_profile_updates(
+        user,
+        [
+            {"key": "address_as", "value": "小满", "source": "叫我小满"},
+            {"key": "health", "value": "感冒", "source": "我感冒了"},
+        ],
+        now,
+    )
+    view = user_mod.profile_view(user)
+    assert view["has_content"] is True
+    assert view["address_as"] == "小满"
+    assert view["health"][0]["text"] == "感冒"
+
+
+def test_clear_profile_keeps_transient_state() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    user_mod.apply_profile_updates(
+        user, [{"key": "city", "value": "杭州", "source": "我在杭州"}], now
+    )
+    user_mod.apply_place(user, "公司", now)
+    user["sleeping"] = True
+
+    assert user_mod.clear_profile(user) is True
+    assert user_mod.profile_view(user)["has_content"] is False
+    assert user["place"] == "公司"
+    assert user["sleeping"] is True
+    assert user_mod.clear_profile(user) is False
+
+
+def test_persona_snapshot_includes_profile() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    state = store_mod.empty_state("A")
+    user_mod.apply_profile_updates(
+        state["user"],
+        [{"key": "address_as", "value": "小满", "source": "叫我小满"}],
+        now,
+    )
+    card = panel_mod.persona_snapshot(
+        "A",
+        cfg.Target("A", "matrix", "FriendMessage", "@a:server"),
+        state,
+        _panel_settings(),
+        now,
+    )
+    assert card["profile"]["has_content"] is True
+    assert card["profile"]["address_as"] == "小满"

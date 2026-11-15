@@ -462,6 +462,100 @@ def apply_profile_updates(
     return {"applied": applied, "rejected": rejected}
 
 
+def profile_view(user: Any) -> dict[str, Any]:
+    """Return a read-only profile view for the panel.
+
+    Args:
+        user: The persona's ``user`` mapping.
+
+    Returns:
+        A JSON-serializable view; ``has_content`` is False when nothing was learned.
+    """
+    if not isinstance(user, dict):
+        return {"has_content": False}
+    profile = user.get("profile") if isinstance(user.get("profile"), dict) else {}
+    health = [
+        {
+            "text": str(entry.get("text") or ""),
+            "since": str(entry.get("since") or ""),
+            "status": str(entry.get("status") or ""),
+        }
+        for entry in (profile.get("health") or [])
+        if isinstance(entry, dict) and entry.get("text")
+    ]
+    view = {
+        "display_name": str(profile.get("display_name") or ""),
+        "address_as": str(profile.get("address_as") or ""),
+        "city": str(profile.get("city") or ""),
+        "timezone": str(profile.get("timezone") or ""),
+        "occupation": str(profile.get("occupation") or ""),
+        "usual_sleep": str(profile.get("usual_sleep") or ""),
+        "notes": str(profile.get("notes") or ""),
+        "interests": [str(item) for item in (profile.get("interests") or [])],
+        "values": [str(item) for item in (profile.get("values") or [])],
+        "dislikes": [str(item) for item in (profile.get("dislikes") or [])],
+        "important_dates": [
+            str(item.get("text") or "")
+            for item in (profile.get("important_dates") or [])
+            if isinstance(item, dict) and item.get("text")
+        ],
+        "health": health,
+        "updated_at": float(profile.get("updated_at") or 0.0),
+    }
+    scalars = (
+        view["display_name"],
+        view["address_as"],
+        view["city"],
+        view["timezone"],
+        view["occupation"],
+        view["usual_sleep"],
+        view["notes"],
+    )
+    has_content = any(scalars) or any(
+        view[key]
+        for key in (
+            "interests",
+            "values",
+            "dislikes",
+            "important_dates",
+            "health",
+        )
+    )
+    view["has_content"] = bool(has_content)
+    return view
+
+
+def clear_profile(user: dict[str, Any]) -> bool:
+    """Drop every learned profile fact, keeping transient session state.
+
+    Args:
+        user: The persona's ``user`` mapping, mutated in place.
+
+    Returns:
+        True when there was something to clear.
+    """
+    if not isinstance(user, dict):
+        return False
+    profile = user.get("profile")
+    had_content = False
+    if isinstance(profile, dict):
+        had_content = bool(
+            any(str(profile.get(key) or "").strip() for key in PROFILE_SCALAR_FIELDS)
+            or any(profile.get(key) for key in PROFILE_LIST_FIELDS)
+            or any(profile.get(key) for key in PROFILE_DATED_FIELDS)
+        )
+    else:
+        profile = {}
+        user["profile"] = profile
+    for key in PROFILE_SCALAR_FIELDS:
+        profile[key] = ""
+    for key in PROFILE_LIST_FIELDS | PROFILE_DATED_FIELDS:
+        profile[key] = []
+    profile["updated_at"] = 0.0
+    user["observations"] = []
+    return had_content
+
+
 def is_user_sleeping(
     user: Any, now: datetime, *, timeout_hours: float = SLEEPING_TIMEOUT_HOURS
 ) -> bool:

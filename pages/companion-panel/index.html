@@ -147,6 +147,12 @@
     border-radius: 999px;
     min-width: 2px;
   }
+  .profile { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+  .profile summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .prof-row { display: flex; gap: 8px; margin: 3px 0; font-size: 12px; }
+  .prof-row .label { min-width: 52px; }
+  .profile button { margin-top: 8px; }
+  .muted { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -282,6 +288,37 @@ function userRow(user) {
   return `<div class="row"><span class="label">对方</span>${last}${tags.join("")}</div>`;
 }
 
+function renderProfile(profile, personaId) {
+  if (!profile || !profile.has_content) {
+    return `<div class="row"><span class="label">画像</span><span class="muted">还没有学到东西</span></div>`;
+  }
+  const rows = [];
+  const add = (label, value) => {
+    if (!value) return;
+    rows.push(`<div class="prof-row"><span class="label">${label}</span><span>${esc(value)}</span></div>`);
+  };
+  add("称呼", profile.address_as || profile.display_name);
+  add("城市", profile.city);
+  add("作息", profile.usual_sleep);
+  add("职业", profile.occupation);
+  add("在意", (profile.values || []).join("、"));
+  add("不喜欢", (profile.dislikes || []).join("、"));
+  add("兴趣", (profile.interests || []).join("、"));
+  add("日期", (profile.important_dates || []).join("、"));
+  add("备注", profile.notes);
+  const health = (profile.health || [])
+    .map((item) => `${item.text}${item.since ? `（${item.since} 起）` : ""}`)
+    .join("、");
+  if (health) {
+    rows.push(
+      `<div class="prof-row"><span class="label">健康</span>` +
+        `<span>${esc(health)} <span class="tag bad">敏感</span></span></div>`,
+    );
+  }
+  return `<details class="profile"><summary>对方画像</summary>${rows.join("")}` +
+    `<button data-clear-profile="${esc(personaId)}">清空画像</button></details>`;
+}
+
 function renderLog(life) {
   const items = life.log || [];
   if (!items.length) return "";
@@ -339,6 +376,7 @@ function renderCard(card) {
       ${life.sleeping ? `<span class="tag bad">休息中</span>` : ""}
     </div>
     ${userRow(card.user)}
+    ${renderProfile(card.profile, card.persona_id)}
     <div class="status">${esc(life.status) || "还没有生成今天的状态"}</div>
     ${renderLog(life)}
     ${renderPlan(life)}
@@ -402,6 +440,29 @@ function render(data) {
   document.querySelectorAll("[data-test]").forEach((btn) => {
     btn.addEventListener("click", () => testSend(btn));
   });
+  document.querySelectorAll("[data-clear-profile]").forEach((btn) => {
+    btn.addEventListener("click", () => clearProfile(btn));
+  });
+}
+
+async function clearProfile(btn) {
+  const personaId = btn.getAttribute("data-clear-profile");
+  const confirmed = window.confirm(
+    `确定清空「${personaId}」已学习的画像吗？\n临时状态（在睡、在哪、最后一句）不受影响。`,
+  );
+  if (!confirmed) return;
+  btn.disabled = true;
+  btn.textContent = "清空中…";
+  try {
+    const result = await callPost("/clear-profile", { persona_id: personaId });
+    await load();
+    setResult(personaId, result.cleared ? "已清空画像" : "画像本来就是空的", "ok");
+  } catch (err) {
+    setResult(personaId, err.message || String(err), "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "清空画像";
+  }
 }
 
 function setResult(personaId, text, kind) {

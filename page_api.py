@@ -12,6 +12,7 @@ from astrbot.api.web import request
 from .delivery import resolve_platform
 from .panel import overview_payload, persona_snapshot, usage_summary
 from .proactive import gate_reason
+from .user_state import clear_profile
 
 PLUGIN_NAME = "astrbot_plugin_matrix_companion"
 PAGE_API_PATH = f"/{PLUGIN_NAME}/page"
@@ -58,6 +59,12 @@ class CompanionPageApi:
             self.post_test_send,
             ["POST"],
             "发一条测试消息验证投递链路",
+        )
+        register(
+            f"{PAGE_API_PATH}/clear-profile",
+            self.post_clear_profile,
+            ["POST"],
+            "清空该人格已学习的对方画像",
         )
         return True
 
@@ -137,3 +144,20 @@ class CompanionPageApi:
         if not ok:
             return _error(note or "发送失败")
         return _ok({"delivery": note, "text": body})
+
+    async def post_clear_profile(self) -> dict[str, Any]:
+        """Clear every learned profile fact for one persona."""
+        payload = await request.json(default={}) or {}
+        persona_id = str(payload.get("persona_id") or "").strip()
+        if persona_id not in self.plugin.settings.targets:
+            return _error("未找到该人格的投递配置")
+        now = datetime.now()
+        state = self.plugin.store.load(persona_id)
+        cleared = clear_profile(state.setdefault("user", {}))
+        self.plugin._audit(state, "profile_cleared", now=now)
+        try:
+            self.plugin.store.save(persona_id, state)
+        except OSError as exc:
+            logger.warning("清空画像后保存失败：persona=%s error=%s", persona_id, exc)
+            return _error(f"保存失败：{exc}")
+        return _ok({"cleared": cleared})
