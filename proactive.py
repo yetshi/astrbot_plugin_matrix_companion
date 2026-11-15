@@ -24,7 +24,8 @@ PROACTIVE_SYSTEM_RULES = """你要决定此刻是否主动给对方发一条消�
 规则：
 - 只输出要发送的那一句话，不要引号、不要解释、不要 Markdown。
 - 必须符合你当前的状态和日程，不要凭空编造正在做的事。
-- 不要复述上一次说过的话，不要连续追问，不要写“在吗”。
+- 不要复述上一次说过的话，也不要换个说法重复同一个问题。
+- 不要写“在吗”“睡了吗”这类空话。
 - 一句话，最多 40 个汉字。
 - 如果此刻没什么想说的，只输出 SKIP。"""
 
@@ -62,6 +63,7 @@ def proactive_prompt(
     unanswered: int = 0,
     user_note: str = "",
     user_sleeping: bool = False,
+    awaiting_reply: bool = False,
 ) -> tuple[str, str]:
     """Build the prompts that decide whether to send a message.
 
@@ -73,6 +75,7 @@ def proactive_prompt(
         unanswered: Consecutive proactive messages without a reply.
         user_note: Short description of what the user last said or is doing.
         user_sleeping: Whether the user said they went to sleep.
+        awaiting_reply: Whether the last proactive message got no reply yet.
 
     Returns:
         ``(system_prompt, user_prompt)``.
@@ -86,11 +89,22 @@ def proactive_prompt(
         parts.append("对方说过去睡了，除非确实有事，否则不要发消息。")
     if last_text:
         parts.append(f"你上次主动说：{last_text}")
+    if awaiting_reply:
+        parts.append(
+            "上次那条到现在还没有回应。不要追问同一件事，也不要换个说法再问一遍；"
+            "可以聊一件和上次无关的事，或者这次先不说话。"
+        )
+    else:
+        parts.append(
+            "对方已经回应过。可以自然接着聊，也可以顺势说说你自己在做什么，"
+            "不必强行把话题拉回上次的内容。"
+        )
     if unanswered >= 2:
         parts.append("你已经连续几条没有得到回应，这次只有确实想分享点什么才开口。")
     parts.append(
-        "现在要发消息吗？内容必须和对方最后说的话接得上，不要自顾自换话题。"
-        "想发就直接给出一句话，不想发输出 SKIP。"
+        "如果旧话题已经自然收尾（告别、约定改天、对方说去忙），不要硬接着聊。"
+        "分享你自己正在做的事，通常比追问对方更容易接。"
+        "现在要发消息吗？想发就直接给出一句话，不想发输出 SKIP。"
     )
     return system, "\n".join(parts)
 

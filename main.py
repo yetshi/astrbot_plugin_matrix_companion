@@ -424,6 +424,11 @@ class MatrixCompanionPlugin(Star):
         proactive = (
             state.get("proactive") if isinstance(state.get("proactive"), dict) else {}
         )
+        inbound = state.get("inbound") if isinstance(state.get("inbound"), dict) else {}
+        last_sent_at = float(proactive.get("last_sent_at") or 0.0)
+        last_inbound_at = float(inbound.get("last_at") or 0.0)
+        # No reply since the last proactive message: the topic is still hanging.
+        awaiting_reply = bool(last_sent_at and last_sent_at > last_inbound_at)
         system, user = proactive_prompt(
             self._persona_prompt(persona_id),
             life,
@@ -432,6 +437,7 @@ class MatrixCompanionPlugin(Star):
             unanswered=int(proactive.get("unanswered") or 0),
             user_note=user_summary(state.get("user"), now),
             user_sleeping=is_user_sleeping(state.get("user"), now),
+            awaiting_reply=awaiting_reply,
         )
         return await decide_message(
             self._llm_for(persona_id, state, "proactive"), system, user

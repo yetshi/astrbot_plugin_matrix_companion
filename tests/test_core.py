@@ -677,7 +677,33 @@ def test_proactive_prompt_includes_user_note() -> None:
         "你是阿星", life, now, user_note="对方最后说：我先睡了"
     )
     assert "我先睡了" in user_prompt
-    assert "接得上" in user_prompt
+    assert "现在要发消息吗" in user_prompt
+
+
+def test_proactive_prompt_warns_against_repeating_when_unanswered() -> None:
+    now = datetime(2026, 1, 1, 22, 0)
+    life = {"mood": "平静", "energy": 50, "status": "在看书", "plan": []}
+    _, user_prompt = pro.proactive_prompt(
+        "你是阿星",
+        life,
+        now,
+        last_text="你昨天说的那家店怎么样",
+        awaiting_reply=True,
+    )
+    assert "还没有回应" in user_prompt
+    assert "不要追问同一件事" in user_prompt
+    assert "换个说法再问一遍" in user_prompt
+
+
+def test_proactive_prompt_allows_continuity_when_answered() -> None:
+    now = datetime(2026, 1, 1, 22, 0)
+    life = {"mood": "平静", "energy": 50, "status": "在看书", "plan": []}
+    _, user_prompt = pro.proactive_prompt(
+        "你是阿星", life, now, awaiting_reply=False
+    )
+    assert "对方已经回应过" in user_prompt
+    assert "不必强行" in user_prompt
+    assert "不要追问同一件事" not in user_prompt
 
 
 def test_persona_snapshot_includes_user_state() -> None:
