@@ -186,6 +186,8 @@ data/plugin_data/astrbot_plugin_matrix_companion/personas/<人格>.json
 
 - [主动消息的话题连续性](docs/PROACTIVE_TOPIC_DESIGN.md)：为什么会黏住旧话题、
   四阶段状态机、闸门与提示词方案、落地顺序（阶段 0 已完成）
+- [日程、事件量级与状态归属](docs/SCHEDULE_EVENT_DESIGN.md)：为什么小事件会引发大改写、
+  三层影响半径、状态与地点当前记在谁身上、待做阶段
 
 ## 安装
 
