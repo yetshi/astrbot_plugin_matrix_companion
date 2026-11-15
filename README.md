@@ -182,6 +182,11 @@ data/plugin_data/astrbot_plugin_matrix_companion/personas/<人格>.json
 
 写入使用临时文件 + 原子替换，损坏文件会回退为初始状态并标记 `load_error`。
 
+## 设计记录
+
+- [主动消息的话题连续性](docs/PROACTIVE_TOPIC_DESIGN.md)：为什么会黏住旧话题、
+  四阶段状态机、闸门与提示词方案、落地顺序（阶段 0 已完成）
+
 ## 安装
 
 把目录放到 AstrBot 的 `data/plugins/` 下，重启 AstrBot 或在插件管理页重载。
@@ -193,7 +198,7 @@ data/plugin_data/astrbot_plugin_matrix_companion/personas/<人格>.json
 | --- | --- |
 | 生成方式 | AI 生成，人负责提需求、定行为、跑起来验证并反馈问题 |
 | 代码来源 | 按 `astrbot_plugin_private_companion` 的设计思路**重新写的**，没有复制它的源码 |
-| 测试 | 94 个不依赖 AstrBot 运行时的单元测试；投递、主动、面板在 Matrix 上人工验证过 |
+| 测试 | 99 个不依赖 AstrBot 运行时的单元测试；投递、主动、面板在 Matrix 上人工验证过 |
 | 已知边界 | 关键词规则偏保守；生活模拟只有一天，跨天只带一句摘要；没有长期记忆 |
 | 维护承诺 | 没有。这是一个自用插件，接口随 AstrBot 版本可能失效 |
 
