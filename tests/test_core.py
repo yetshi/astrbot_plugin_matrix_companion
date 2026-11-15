@@ -525,7 +525,7 @@ def test_page_routes_match_the_bridge_path() -> None:
 def test_parse_reconcile_payload_extracts_patch() -> None:
     raw = (
         '```json\n{"mood":"轻快","energy":55,"status":"刚和你聊完，还笑着",'
-        '"log":"和你聊了很久","plan_remaining":'
+        '"log":"和你聊了很久","plan_changes":'
         '[{"start":"21:00","end":"22:00","activity":"洗漱","place":"家"}]}\n```'
     )
     patch = life_mod.parse_reconcile_payload(raw)
@@ -533,7 +533,39 @@ def test_parse_reconcile_payload_extracts_patch() -> None:
     assert patch["mood"] == "轻快"
     assert patch["energy"] == 55
     assert patch["log"] == "和你聊了很久"
-    assert patch["plan_remaining"][0]["start_minute"] == 1260
+    assert patch["plan_changes"][0]["start_minute"] == 1260
+
+
+def test_parse_reconcile_payload_accepts_legacy_plan_remaining() -> None:
+    raw = (
+        '{"plan_remaining":'
+        '[{"start":"21:00","end":"22:00","activity":"洗漱"}]}'
+    )
+    patch = life_mod.parse_reconcile_payload(raw)
+    assert patch is not None
+    assert patch["plan_changes"][0]["activity"] == "洗漱"
+
+
+def test_reconcile_prompt_lists_full_future_plan_and_forbids_rewrite() -> None:
+    now = datetime(2026, 1, 1, 15, 0)
+    life = {
+        "plan": life_mod.normalize_plan(
+            [
+                {"start": "16:00", "end": "17:00", "activity": "健身"},
+                {"start": "18:00", "end": "19:00", "activity": "做饭"},
+                {"start": "20:00", "end": "21:00", "activity": "读书"},
+                {"start": "22:00", "end": "23:00", "activity": "洗漱"},
+            ]
+        )
+    }
+    system, user = life_mod.reconcile_prompt("你是阿星", life, ["对方：晚上一起看书吧"], now)
+
+    # 未来 4 条都要能看见，否则模型只能重编
+    for activity in ("健身", "做饭", "读书", "洗漱"):
+        assert activity in user
+    assert "只输出" in system
+    assert "不要重写" in system
+    assert "plan_changes" in system
 
 
 @pytest.mark.parametrize("raw", ["算了", "{}", "[1,2]", "null"])
@@ -562,7 +594,7 @@ def test_apply_reconcile_overrides_status_and_plan() -> None:
         "energy": 70,
         "status": "刚和你聊完天",
         "log": "一起聊了会儿",
-        "plan_remaining": life_mod.normalize_plan(
+        "plan_changes": life_mod.normalize_plan(
             [{"start": "21:00", "end": "22:30", "activity": "看电影", "place": "客厅"}]
         ),
     }
@@ -761,7 +793,7 @@ def test_apply_reconcile_keeps_non_overlapping_future_items() -> None:
         "manual_until": 0.0,
     }
     patch = {
-        "plan_remaining": life_mod.normalize_plan(
+        "plan_changes": life_mod.normalize_plan(
             [{"start": "19:30", "end": "20:30", "activity": "一起看书"}]
         )
     }

@@ -302,12 +302,15 @@ def needs_generation(life: dict[str, Any], now: datetime) -> bool:
     return not isinstance(plan, list) or not plan
 
 
-def life_summary(life: dict[str, Any], now: datetime) -> str:
+def life_summary(
+    life: dict[str, Any], now: datetime, *, upcoming_limit: int = 2
+) -> str:
     """Render a compact life description for prompts.
 
     Args:
         life: The persona's ``life`` mapping.
         now: Current local time.
+        upcoming_limit: How many upcoming plan items to list.
 
     Returns:
         A short multi-line summary.
@@ -329,7 +332,7 @@ def life_summary(life: dict[str, Any], now: datetime) -> str:
         item
         for item in plan
         if item.get("start_minute", 0) > now.hour * 60 + now.minute
-    ][:2]
+    ][:upcoming_limit]
     for item in upcoming:
         lines.append(f"接下来：{item.get('start')} {item.get('activity')}")
     log = life.get("log") if isinstance(life.get("log"), list) else []
@@ -346,16 +349,16 @@ RECONCILE_SYSTEM_RULES = """你正在过自己的生活，刚刚和对方聊过�
 - energy：0-100 的整数，聊天消耗或放松都可能改变它
 - status：一句话，第三人称，说明你现在在做什么、刚发生了什么，最多 60 字
 - log：一行，记录这次互动里实际发生的事，最多 40 字；没有值得记的就留空
-- plan_remaining：可选，是否给出按下面的规则判断
+- plan_changes：可选，只有日程确实需要变化时才输出
 
-关于 plan_remaining：
+关于 plan_changes：
 1. 只有对方明确约定了具体的共同活动时才输出，例如「下午一起看书」
    「晚上一起看电影」「九点我来找你」。活动要具体；时间不明确就安排在最近合适的时间段。
 2. 模糊提议不要写进日程，例如「改天一起看电影」「下次再聊」「有空一起」。
 3. 普通闲聊、问候、情绪表达、单纯询问，不要改日程，只更新 mood、energy、status、log。
-4. 输出时必须给出从此刻到今天的完整剩余安排，保留原本没有冲突的条目，
-   不要只写新增的那一条。
-5. 和原有安排冲突时，用新安排替换冲突的那一段，其余保持不动。
+4. 只输出**发生变化**的条目。上面已经列出你接下来的安排，没有被这次对话影响的部分
+   不要重写、不要补抄，保持原样。
+5. 新条目和原有安排时间重叠时会替换那一段，其余自动保留。
 6. 每项含 start、end、activity、place。"""
 
 
@@ -381,10 +384,10 @@ def reconcile_prompt(
     dialogue = "\n".join(f"- {line}" for line in chat_lines if str(line).strip())
     user = "\n".join(
         [
-            life_summary(life, now),
+            life_summary(life, now, upcoming_limit=12),
             "刚刚的对话：",
             dialogue or "- （无）",
-            "请更新状态。",
+            "请更新状态；日程只写发生变化的条目。",
         ]
     )
     return system, user
@@ -424,9 +427,11 @@ def parse_reconcile_payload(text: str) -> dict[str, Any] | None:
     log = str(payload.get("log") or "").strip()[:200]
     if log:
         patch["log"] = log
-    remaining = normalize_plan(payload.get("plan_remaining"))
-    if remaining:
-        patch["plan_remaining"] = remaining
+    changes = normalize_plan(
+        payload.get("plan_changes") or payload.get("plan_remaining")
+    )
+    if changes:
+        patch["plan_changes"] = changes
     return patch or None
 
 
@@ -455,13 +460,13 @@ def apply_reconcile(
         life["manual_until"] = now.timestamp() + max(1, manual_minutes) * 60
     if patch.get("log"):
         append_life_log(life, patch["log"], now.timestamp())
-    remaining = patch.get("plan_remaining")
-    if isinstance(remaining, list) and remaining:
+    changes = patch.get("plan_changes") or patch.get("plan_remaining")
+    if isinstance(changes, list) and changes:
         minute = now.hour * 60 + now.minute
         plan = life.get("plan") if isinstance(life.get("plan"), list) else []
         started = [item for item in plan if item.get("start_minute", 0) <= minute]
         future = [item for item in plan if item.get("start_minute", 0) > minute]
-        for new_item in remaining:
+        for new_item in changes:
             start = int(new_item.get("start_minute") or 0)
             end = int(new_item.get("end_minute") or 0)
             # Replace only entries that actually overlap, so a partial model

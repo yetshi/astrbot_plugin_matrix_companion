@@ -82,6 +82,7 @@ def empty_state(persona_id: str) -> dict[str, Any]:
         "usage": {},
         # What the user said about their own state (sleeping / away / back).
         "user": {
+            "user_id": "",
             "sleeping": False,
             "sleeping_since": 0.0,
             "away": "",

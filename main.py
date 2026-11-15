@@ -145,7 +145,19 @@ class MatrixCompanionPlugin(Star):
         state = self.store.load(target.persona_id)
         state["inbound"] = {"last_at": now.timestamp(), "last_text": text}
         record_reply(state)
-        apply_cue(state.setdefault("user", {}), detect_cue(text), text, now)
+        # Recorded but unused today: it is the migration hook for splitting the
+        # session-level user state per group member later.
+        sender_id = ""
+        sender_getter = getattr(event, "get_sender_id", None)
+        if callable(sender_getter):
+            try:
+                sender_id = str(sender_getter() or "").strip()[:80]
+            except Exception:
+                sender_id = ""
+        user_state = state.setdefault("user", {})
+        if sender_id:
+            user_state["user_id"] = sender_id
+        apply_cue(user_state, detect_cue(text), text, now)
         append_pending_chat(
             state.setdefault("life", {}), f"对方：{text}", now.timestamp()
         )
