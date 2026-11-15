@@ -78,6 +78,8 @@ def empty_state(persona_id: str) -> dict[str, Any]:
             "unanswered": 0,
         },
         "inbound": {"last_at": 0.0, "last_text": ""},
+        # Model call accounting: day -> task -> counters.
+        "usage": {},
         # What the user said about their own state (sleeping / away / back).
         "user": {
             "sleeping": False,
@@ -158,6 +160,54 @@ def append_life_log(
     if not body:
         return
     _append_capped(life, "log", {"at": at, "text": body}, limit)
+
+
+USAGE_RETENTION_DAYS = 14
+
+
+def record_usage(
+    state: dict[str, Any],
+    day: str,
+    task: str,
+    *,
+    input_tokens: int = 0,
+    cached_tokens: int = 0,
+    output_tokens: int = 0,
+    calls: int = 1,
+) -> None:
+    """Accumulate one model call into the per-day usage counters.
+
+    Providers do not always report token usage, so a call is counted even when
+    every token field is zero.
+
+    Args:
+        state: The persona's state document.
+        day: ``YYYY-MM-DD`` bucket.
+        task: ``life_generate``, ``reconcile`` or ``proactive``.
+        input_tokens: Non-cached input tokens.
+        cached_tokens: Cached input tokens.
+        output_tokens: Output tokens.
+        calls: Number of calls to add.
+    """
+    usage = state.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+        state["usage"] = usage
+    bucket = usage.get(day)
+    if not isinstance(bucket, dict):
+        bucket = {}
+        usage[day] = bucket
+    entry = bucket.get(task)
+    if not isinstance(entry, dict):
+        entry = {"calls": 0, "input": 0, "cached": 0, "output": 0}
+        bucket[task] = entry
+    entry["calls"] = int(entry.get("calls") or 0) + max(0, calls)
+    entry["input"] = int(entry.get("input") or 0) + max(0, input_tokens)
+    entry["cached"] = int(entry.get("cached") or 0) + max(0, cached_tokens)
+    entry["output"] = int(entry.get("output") or 0) + max(0, output_tokens)
+    if len(usage) > USAGE_RETENTION_DAYS:
+        for stale in sorted(usage)[: len(usage) - USAGE_RETENTION_DAYS]:
+            usage.pop(stale, None)
 
 
 class PersonaStore:

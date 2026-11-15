@@ -121,6 +121,32 @@
   .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
   .tag.ok { background: #143321; color: var(--ok); }
   .tag.bad { background: #3a1c1c; color: var(--bad); }
+  .usage {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .usage-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .usage-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .usage-tasks { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .usage-table td { padding: 3px 6px; color: var(--muted); }
+  .usage-table td.bar { width: 45%; }
+  .usage-table td.bar > i {
+    display: block;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 999px;
+    min-width: 2px;
+  }
 </style>
 </head>
 <body>
@@ -131,6 +157,17 @@
   <span id="updated" class="chip">尚未加载</span>
 </header>
 <div id="error"></div>
+<section id="usage" class="usage" hidden>
+  <div class="usage-head">
+    <h2>今日消耗</h2>
+    <span id="usageToday" class="chip">—</span>
+  </div>
+  <div id="usageTasks" class="usage-tasks"></div>
+  <details class="audit">
+    <summary>最近 7 天</summary>
+    <table class="usage-table"><tbody id="usageTrend"></tbody></table>
+  </details>
+</section>
 <div id="grid" class="grid"></div>
 <div id="empty" class="empty" hidden>还没有配置人格投递会话</div>
 
@@ -224,6 +261,8 @@ function renderRun(data) {
     ["调度", `${esc(data.tick_minutes)} 分钟`],
     ["免打扰", esc(data.quiet_hours) || "未设置"],
     ["生成时间", esc(data.plan_time)],
+    ["最小间隔", `${esc(data.min_interval_minutes)} 分钟`],
+    ["每日上限", esc(data.daily_limit)],
     ["生活模拟", data.life_sim ? "开启" : "关闭", data.life_sim ? "on" : "off"],
     ["主动消息", data.proactive_enabled ? "开启" : "关闭", data.proactive_enabled ? "on" : "off"],
   ];
@@ -316,8 +355,42 @@ function renderCard(card) {
   </div>`;
 }
 
+function renderUsage(usage) {
+  const root = document.getElementById("usage");
+  if (!root) return;
+  const trend = (usage && usage.trend) || [];
+  if (!trend.length) {
+    root.hidden = true;
+    return;
+  }
+  root.hidden = false;
+  const total = (usage && usage.today_total) || {};
+  document.getElementById("usageToday").textContent =
+    `调用 ${total.calls || 0} 次 · 输入 ${total.input || 0} · 输出 ${total.output || 0}`;
+  const tasks = (usage && usage.tasks) || [];
+  document.getElementById("usageTasks").innerHTML = tasks.length
+    ? tasks
+        .map(
+          (item) =>
+            `<span class="chip">${esc(item.label)} ${esc(item.calls)} 次 / ${esc(item.total)} token</span>`,
+        )
+        .join("")
+    : `<span class="chip off">今日还没有模型调用</span>`;
+  const max = Math.max(1, ...trend.map((day) => Number(day.calls) || 0));
+  document.getElementById("usageTrend").innerHTML = trend
+    .map((day) => {
+      const calls = Number(day.calls) || 0;
+      const width = Math.round((calls / max) * 100);
+      return `<tr><td>${esc(String(day.date || "").slice(5))}</td>` +
+        `<td class="bar"><i style="width:${width}%"></i></td>` +
+        `<td>${calls} 次 / ${esc(day.total)} token</td></tr>`;
+    })
+    .join("");
+}
+
 function render(data) {
   renderRun(data);
+  renderUsage(data.usage);
   const cards = data.personas || [];
   document.getElementById("grid").innerHTML = cards.map(renderCard).join("");
   document.getElementById("empty").hidden = cards.length > 0;

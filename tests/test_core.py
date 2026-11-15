@@ -793,3 +793,62 @@ def test_manual_status_blocks_activity_mood_override() -> None:
     advanced = life_mod.advance_state(life, now)
     assert advanced["mood"] == "轻快"
     assert advanced["status"] == "刚和你聊完"
+
+# ── usage accounting ─────────────────────────────────────────────────────
+
+
+def test_record_usage_accumulates_and_prunes() -> None:
+    state = store_mod.empty_state("A")
+    store_mod.record_usage(
+        state, "2026-01-01", "reconcile", input_tokens=100, output_tokens=10
+    )
+    store_mod.record_usage(
+        state,
+        "2026-01-01",
+        "reconcile",
+        input_tokens=50,
+        cached_tokens=5,
+        output_tokens=20,
+    )
+    entry = state["usage"]["2026-01-01"]["reconcile"]
+    assert entry == {"calls": 2, "input": 150, "cached": 5, "output": 30}
+
+    for day in range(1, 20):
+        store_mod.record_usage(state, f"2026-02-{day:02d}", "proactive")
+    assert len(state["usage"]) == store_mod.USAGE_RETENTION_DAYS
+
+
+def test_usage_summary_aggregates_personas() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    first = store_mod.empty_state("A")
+    second = store_mod.empty_state("B")
+    store_mod.record_usage(
+        first, "2026-01-02", "reconcile", input_tokens=100, output_tokens=10
+    )
+    store_mod.record_usage(
+        second, "2026-01-02", "reconcile", input_tokens=200, output_tokens=20
+    )
+    store_mod.record_usage(first, "2026-01-02", "proactive", input_tokens=50)
+    store_mod.record_usage(first, "2025-12-01", "proactive")
+
+    summary = panel_mod.usage_summary({"A": first, "B": second}, now, days=3)
+
+    assert summary["today"] == "2026-01-02"
+    tasks = {item["task"]: item for item in summary["tasks"]}
+    assert tasks["reconcile"]["calls"] == 2
+    assert tasks["reconcile"]["total"] == 330
+    assert tasks["proactive"]["calls"] == 1
+    assert summary["today_total"]["calls"] == 3
+    assert len(summary["trend"]) == 3
+    assert summary["trend"][-1]["calls"] == 3
+    assert all(item["calls"] == 0 for item in summary["trend"][:-1])
+
+
+def test_overview_payload_includes_usage_and_interval() -> None:
+    now = datetime(2026, 1, 1, 9, 30)
+    payload = panel_mod.overview_payload(
+        _panel_settings(), now, [], usage={"today_total": {"calls": 4}}
+    )
+    assert payload["usage"]["today_total"]["calls"] == 4
+    assert payload["min_interval_minutes"] == 90
+    assert payload["daily_limit"] == 6

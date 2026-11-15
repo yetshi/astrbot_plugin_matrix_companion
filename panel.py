@@ -6,7 +6,7 @@ availability, persona prompt presence) and this module shapes the payload.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .config import Settings, Target
@@ -142,12 +142,100 @@ def persona_snapshot(
     }
 
 
+TASK_LABELS = {
+    "life_generate": "生活生成",
+    "reconcile": "对话回写",
+    "proactive": "主动判断",
+}
+TASK_ORDER = ("life_generate", "reconcile", "proactive")
+
+
+def usage_summary(
+    states: dict[str, dict[str, Any]], now: datetime, *, days: int = 7
+) -> dict[str, Any]:
+    """Aggregate model-call counters across personas.
+
+    Args:
+        states: Mapping of persona id to state document.
+        now: Current local time.
+        days: How many days to include, ending today.
+
+    Returns:
+        A JSON-serializable usage block for the panel.
+    """
+    wanted: list[str] = []
+    for offset in range(max(1, days) - 1, -1, -1):
+        wanted.append((now.date() - timedelta(days=offset)).isoformat())
+
+    per_day: dict[str, dict[str, dict[str, int]]] = {}
+    for state in states.values():
+        usage = state.get("usage") if isinstance(state.get("usage"), dict) else {}
+        for day, tasks in usage.items():
+            if day not in wanted or not isinstance(tasks, dict):
+                continue
+            day_bucket = per_day.setdefault(day, {})
+            for task, entry in tasks.items():
+                if not isinstance(entry, dict):
+                    continue
+                bucket = day_bucket.setdefault(
+                    task, {"calls": 0, "input": 0, "cached": 0, "output": 0}
+                )
+                for key in ("calls", "input", "cached", "output"):
+                    bucket[key] += int(entry.get(key) or 0)
+
+    today = wanted[-1]
+    summary: list[dict[str, Any]] = []
+    today_total = {"calls": 0, "input": 0, "cached": 0, "output": 0}
+    today_tasks = per_day.get(today, {})
+    for task in TASK_ORDER:
+        entry = today_tasks.get(task)
+        if not entry:
+            continue
+        total = entry["input"] + entry["cached"] + entry["output"]
+        summary.append(
+            {
+                "task": task,
+                "label": TASK_LABELS.get(task, task),
+                "calls": entry["calls"],
+                "input": entry["input"],
+                "cached": entry["cached"],
+                "output": entry["output"],
+                "total": total,
+            }
+        )
+        for key in today_total:
+            today_total[key] += entry[key]
+    today_total["total"] = (
+        today_total["input"] + today_total["cached"] + today_total["output"]
+    )
+
+    trend: list[dict[str, Any]] = []
+    for day in wanted:
+        tasks = per_day.get(day, {})
+        calls = sum(int(item.get("calls") or 0) for item in tasks.values())
+        total = sum(
+            int(item.get("input") or 0)
+            + int(item.get("cached") or 0)
+            + int(item.get("output") or 0)
+            for item in tasks.values()
+        )
+        trend.append({"date": day, "calls": calls, "total": total})
+
+    return {
+        "today": today,
+        "tasks": summary,
+        "today_total": today_total,
+        "trend": trend,
+    }
+
+
 def overview_payload(
     settings: Settings,
     now: datetime,
     cards: list[dict[str, Any]],
     *,
     config_error: str = "",
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Wrap persona cards with run-level metadata.
 
@@ -156,6 +244,7 @@ def overview_payload(
         now: Current local time.
         cards: Per-persona snapshots.
         config_error: Persona-target parse error, if any.
+        usage: Model-call summary from :func:`usage_summary`.
 
     Returns:
         The panel payload.
@@ -165,8 +254,11 @@ def overview_payload(
         "tick_minutes": settings.tick_minutes,
         "quiet_hours": settings.quiet_hours,
         "plan_time": settings.plan_time,
+        "min_interval_minutes": settings.min_interval_minutes,
+        "daily_limit": settings.daily_limit,
         "life_sim": settings.enable_life_sim,
         "proactive_enabled": settings.enable_proactive,
         "config_error": config_error,
+        "usage": usage or {},
         "personas": cards,
     }

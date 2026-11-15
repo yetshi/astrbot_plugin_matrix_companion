@@ -10,7 +10,7 @@ from astrbot.api import logger
 from astrbot.api.web import request
 
 from .delivery import resolve_platform
-from .panel import overview_payload, persona_snapshot
+from .panel import overview_payload, persona_snapshot, usage_summary
 from .proactive import gate_reason
 
 PLUGIN_NAME = "astrbot_plugin_matrix_companion"
@@ -66,8 +66,10 @@ class CompanionPageApi:
         settings = self.plugin.settings
         now = datetime.now()
         cards: list[dict[str, Any]] = []
+        states: dict[str, dict[str, Any]] = {}
         for persona_id, target in settings.targets.items():
             state = self.plugin.store.load(persona_id)
+            states[persona_id] = state
             platform = resolve_platform(self.plugin.context, target.platform_id)
             cards.append(
                 persona_snapshot(
@@ -87,6 +89,7 @@ class CompanionPageApi:
                 now,
                 cards,
                 config_error=str(getattr(self.plugin, "_config_error", "") or ""),
+                usage=usage_summary(states, now),
             )
         )
 

@@ -38,7 +38,13 @@ from .proactive import (
     record_reply,
     record_sent,
 )
-from .store import PersonaStore, append_audit, append_pending_chat, now_iso
+from .store import (
+    PersonaStore,
+    append_audit,
+    append_pending_chat,
+    now_iso,
+    record_usage,
+)
 from .user_state import apply_cue, detect_cue, is_user_sleeping, user_summary
 
 PLUGIN_NAME = "astrbot_plugin_matrix_companion"
@@ -325,7 +331,10 @@ class MatrixCompanionPlugin(Star):
     ) -> None:
         previous = dict(state.get("life") or {})
         payload = await generate_daily_life(
-            self._call_llm, self._persona_prompt(persona_id), now, previous
+            self._llm_for(persona_id, state, "life_generate"),
+            self._persona_prompt(persona_id),
+            now,
+            previous,
         )
         life = state.setdefault("life", {})
         if payload is None:
@@ -380,7 +389,7 @@ class MatrixCompanionPlugin(Star):
             self._persona_prompt(persona_id), life, lines, now
         )
         try:
-            raw = await self._call_llm(system, user)
+            raw = await self._call_llm(system, user, task="reconcile", state=state)
         except Exception as exc:
             logger.warning("生活状态回写失败：persona=%s error=%s", persona_id, exc)
             return False
@@ -424,7 +433,9 @@ class MatrixCompanionPlugin(Star):
             user_note=user_summary(state.get("user"), now),
             user_sleeping=is_user_sleeping(state.get("user"), now),
         )
-        return await decide_message(self._call_llm, system, user)
+        return await decide_message(
+            self._llm_for(persona_id, state, "proactive"), system, user
+        )
 
     # ── model access ─────────────────────────────────────────────────────
 
@@ -451,11 +462,28 @@ class MatrixCompanionPlugin(Star):
         except Exception:
             return None
 
-    async def _call_llm(self, system: str, user: str) -> str:
+    async def _call_llm(
+        self,
+        system: str,
+        user: str,
+        *,
+        task: str = "",
+        state: dict[str, Any] | None = None,
+    ) -> str:
         provider = self._resolve_provider()
         if provider is None:
             raise RuntimeError("没有可用的模型 provider")
         response = await provider.text_chat(prompt=user, system_prompt=system)
+        if task and state is not None:
+            usage = getattr(response, "usage", None)
+            record_usage(
+                state,
+                datetime.now().date().isoformat(),
+                task,
+                input_tokens=int(getattr(usage, "input_other", 0) or 0),
+                cached_tokens=int(getattr(usage, "input_cached", 0) or 0),
+                output_tokens=int(getattr(usage, "output", 0) or 0),
+            )
         text = getattr(response, "completion_text", "") or ""
         if text:
             return str(text)
@@ -466,6 +494,23 @@ class MatrixCompanionPlugin(Star):
             if value:
                 parts.append(str(value))
         return "".join(parts)
+
+    def _llm_for(self, persona_id: str, state: dict[str, Any], task: str) -> Any:
+        """Return a two-argument LLM callable that records usage.
+
+        Args:
+            persona_id: Persona the call belongs to.
+            state: State document receiving the counters.
+            task: Usage bucket name.
+
+        Returns:
+            An async callable accepting ``(system, user)``.
+        """
+
+        async def call(system: str, user: str) -> str:
+            return await self._call_llm(system, user, task=task, state=state)
+
+        return call
 
     def _persona_prompt(self, persona_id: str) -> str:
         manager = getattr(self.context, "persona_manager", None)
