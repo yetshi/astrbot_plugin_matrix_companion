@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>生活面板</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --card: #171e2c;
+    --line: #263145;
+    --text: #e6edf7;
+    --muted: #8b9bb4;
+    --accent: #6ea8fe;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    padding: 3px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .chip.on { color: var(--ok); border-color: #2f5c45; }
+  .chip.off { color: var(--muted); }
+  button {
+    background: #1f2a3d;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .card-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .result { margin-top: 8px; font-size: 12px; color: var(--muted); word-break: break-word; }
+  .result.ok { color: var(--ok); }
+  .result.err { color: var(--bad); }
+  .name { font-size: 15px; font-weight: 600; }
+  .route { color: var(--muted); font-size: 11px; word-break: break-all; }
+  .row { display: flex; gap: 8px; margin: 6px 0; align-items: center; }
+  .label { color: var(--muted); font-size: 12px; min-width: 52px; }
+  .energy {
+    flex: 1;
+    height: 8px;
+    background: #0c111b;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .energy > i { display: block; height: 100%; background: var(--accent); }
+  .status { margin: 8px 0; line-height: 1.5; word-break: break-word; }
+  .plan { margin: 8px 0 0; padding: 0; list-style: none; }
+  .plan li {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .plan li.now { color: var(--text); }
+  .plan li.now::before { content: "▶"; color: var(--accent); }
+  .plan li:not(.now)::before { content: "·"; }
+  .plan .time { font-variant-numeric: tabular-nums; flex: none; }
+  .gate { margin-top: 10px; font-size: 13px; }
+  .gate.ok { color: var(--ok); }
+  .gate.blocked { color: var(--warn); }
+  .audit { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+  .audit summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .audit ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
+  .audit li { margin: 2px 0; word-break: break-word; }
+  .error {
+    background: #3a1c1c;
+    border: 1px solid #6b2b2b;
+    color: #ffd7d7;
+    padding: 10px 12px;
+    border-radius: 10px;
+    margin-bottom: 14px;
+    white-space: pre-wrap;
+  }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .tag.ok { background: #143321; color: var(--ok); }
+  .tag.bad { background: #3a1c1c; color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>生活面板</h1>
+<div id="run" class="chips"></div>
+<header>
+  <button id="refresh">刷新</button>
+  <span id="updated" class="chip">尚未加载</span>
+</header>
+<div id="error"></div>
+<div id="grid" class="grid"></div>
+<div id="empty" class="empty" hidden>还没有配置人格投递会话</div>
+
+<script>
+// The dashboard bridge already prefixes the plugin name, so endpoints must be
+// relative to it (page/state). The bare form is a compatibility fallback for
+// hosts that do not prefix.
+const ENDPOINT_PREFIXES = ["page", ""];
+const ROUTE_MISSING = /未找到该路由|route not found|not found/i;
+let bridge = null;
+let timer = null;
+
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+function fmtTime(ts) {
+  if (!ts) return "从未";
+  const d = new Date(ts * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function waitForBridge(timeoutMs = 4000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const candidate = window.AstrBotPluginPage || window.AstrBotPluginView;
+    if (candidate && typeof candidate.apiGet === "function") return candidate;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  return window.AstrBotPluginPage || window.AstrBotPluginView || null;
+}
+
+async function getBridge() {
+  if (bridge) return bridge;
+  // The host injects the bridge SDK at the end of the document, after this
+  // inline script runs, so the first paint has to wait for it instead of
+  // failing until the user clicks refresh.
+  const candidate = await waitForBridge();
+  if (!candidate) return null;
+  if (typeof candidate.ready === "function") {
+    try {
+      await Promise.race([
+        candidate.ready(),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch (err) { /* context timeout is not fatal */ }
+  }
+  bridge = candidate;
+  return bridge;
+}
+
+async function callBridge(method, path, body) {
+  const api = await getBridge();
+  if (!api) {
+    throw new Error("未检测到 AstrBot 页面桥接，请从 AstrBot 后台的插件扩展页打开面板");
+  }
+  const clean = String(path || "").replace(/^\/+/, "");
+  let lastError = null;
+  for (const prefix of ENDPOINT_PREFIXES) {
+    const endpoint = prefix ? `${prefix}/${clean}` : clean;
+    try {
+      const payload = method === "POST"
+        ? await api.apiPost(endpoint, body || {})
+        : await api.apiGet(endpoint);
+      if (!payload) throw new Error("接口无返回");
+      if (payload.success === false) throw new Error(payload.error || "请求失败");
+      return payload.data !== undefined ? payload.data : payload;
+    } catch (err) {
+      lastError = err;
+      const text = String(err && err.message ? err.message : err);
+      if (!ROUTE_MISSING.test(text)) throw err;
+    }
+  }
+  throw lastError || new Error("请求失败");
+}
+
+function callGet(path) {
+  return callBridge("GET", path, null);
+}
+
+function callPost(path, body) {
+  return callBridge("POST", path, body);
+}
+
+function renderRun(data) {
+  const chips = [
+    ["时间", esc(data.now)],
+    ["调度", `${esc(data.tick_minutes)} 分钟`],
+    ["免打扰", esc(data.quiet_hours) || "未设置"],
+    ["生成时间", esc(data.plan_time)],
+    ["生活模拟", data.life_sim ? "开启" : "关闭", data.life_sim ? "on" : "off"],
+    ["主动消息", data.proactive_enabled ? "开启" : "关闭", data.proactive_enabled ? "on" : "off"],
+  ];
+  document.getElementById("run").innerHTML = chips
+    .map(([k, v, cls]) => `<span class="chip ${cls || ""}">${esc(k)}：${v}</span>`)
+    .join("");
+}
+
+function userRow(user) {
+  if (!user) return "";
+  const tags = [];
+  if (user.sleeping) tags.push('<span class="tag bad">对方说去睡了</span>');
+  if (user.away) tags.push(`<span class="tag">在外：${esc(user.away)}</span>`);
+  if (!user.last_text && !tags.length) return "";
+  const last = user.last_text ? `<span>${esc(user.last_text)}</span>` : "";
+  return `<div class="row"><span class="label">对方</span>${last}${tags.join("")}</div>`;
+}
+
+function renderLog(life) {
+  const items = life.log || [];
+  if (!items.length) return "";
+  const rows = items.map((row) => `<li>${esc(row.text)}</li>`).join("");
+  return `<details class="audit" open><summary>最近发生</summary><ul>${rows}</ul></details>`;
+}
+
+function renderPlan(life) {
+  if (!life.plan || !life.plan.length) return `<div class="row"><span class="label">日程</span><span>今天还没有生成</span></div>`;
+  const nowSeg = life.segment;
+  const items = life.plan.map((item) => {
+    const isNow = nowSeg && nowSeg.start === item.start && nowSeg.activity === item.activity;
+    const place = item.place ? ` · ${esc(item.place)}` : "";
+    return `<li class="${isNow ? "now" : ""}"><span class="time">${esc(item.start)}-${esc(item.end)}</span><span>${esc(item.activity)}${place}</span></li>`;
+  });
+  return `<ul class="plan">${items.join("")}</ul>`;
+}
+
+function renderCard(card) {
+  const life = card.life || {};
+  const pro = card.proactive || {};
+  const energy = Math.max(0, Math.min(100, Number(life.energy || 0)));
+  const promptTag = card.prompt_ready
+    ? `<span class="tag ok">人格提示词</span>`
+    : `<span class="tag bad">人格 ID 未匹配</span>`;
+  const platformTag = card.platform_ready
+    ? `<span class="tag ok">平台实例在线</span>`
+    : `<span class="tag bad">平台实例不可用</span>`;
+  const gateCls = card.can_send ? "ok" : "blocked";
+  const auditRows = (card.audit || []).slice(0, 8).map((row) => {
+    const detail = row.text || row.reason || row.error || "";
+    return `<li>${esc(row.at)} · ${esc(row.event)}${detail ? " · " + esc(detail) : ""}</li>`;
+  }).join("");
+  return `
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="name">${esc(card.persona_id)}</div>
+        <div class="route">${esc(card.platform_id)} · ${esc(card.message_type)} · ${esc(card.umo)}</div>
+      </div>
+      <div class="card-actions">
+        <button data-trigger="${esc(card.persona_id)}">立即主动</button>
+        <button data-test="${esc(card.persona_id)}">测试发送</button>
+      </div>
+    </div>
+    <div class="result" data-result="${esc(card.persona_id)}"></div>
+    <div class="row">${promptTag}${platformTag}</div>
+    <div class="row">
+      <span class="label">精力</span>
+      <span class="energy"><i style="width:${energy}%"></i></span>
+      <span>${energy}</span>
+    </div>
+    <div class="row">
+      <span class="label">心情</span><span>${esc(life.mood) || "未记录"}</span>
+      ${life.sleeping ? `<span class="tag bad">休息中</span>` : ""}
+    </div>
+    ${userRow(card.user)}
+    <div class="status">${esc(life.status) || "还没有生成今天的状态"}</div>
+    ${renderLog(life)}
+    ${renderPlan(life)}
+    <div class="row">
+      <span class="label">主动</span>
+      <span>今日 ${esc(pro.sent_today)}/${esc(pro.daily_limit)}</span>
+      <span class="chip">上次 ${fmtTime(pro.last_sent_at)}</span>
+      <span class="chip">未回应 ${esc(pro.unanswered)}</span>
+    </div>
+    <div class="gate ${gateCls}">判定：${esc(card.gate_label)}</div>
+    <details class="audit">
+      <summary>最近记录（${(card.audit || []).length}）</summary>
+      <ul>${auditRows || "<li>暂无记录</li>"}</ul>
+    </details>
+  </div>`;
+}
+
+function render(data) {
+  renderRun(data);
+  const cards = data.personas || [];
+  document.getElementById("grid").innerHTML = cards.map(renderCard).join("");
+  document.getElementById("empty").hidden = cards.length > 0;
+  document.getElementById("updated").textContent = `更新于 ${new Date().toLocaleTimeString()}`;
+  document.querySelectorAll("[data-trigger]").forEach((btn) => {
+    btn.addEventListener("click", () => trigger(btn));
+  });
+  document.querySelectorAll("[data-test]").forEach((btn) => {
+    btn.addEventListener("click", () => testSend(btn));
+  });
+}
+
+function setResult(personaId, text, kind) {
+  const box = document.querySelector(`[data-result="${personaId}"]`);
+  if (!box) return;
+  box.textContent = text || "";
+  box.className = `result ${kind || ""}`.trim();
+}
+
+async function trigger(btn) {
+  const personaId = btn.getAttribute("data-trigger");
+  btn.disabled = true;
+  btn.textContent = "执行中…";
+  setResult(personaId, "正在执行主动判断…", "");
+  try {
+    const result = await callPost("/trigger", { persona_id: personaId });
+    const detail = result.event + (result.reason || result.text || result.error
+      ? `：${result.reason || result.text || result.error}` : "");
+    await load();
+    setResult(personaId, detail, result.event === "proactive_sent" ? "ok" : "err");
+  } catch (err) {
+    setResult(personaId, err.message || String(err), "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "立即主动";
+  }
+}
+
+async function testSend(btn) {
+  const personaId = btn.getAttribute("data-test");
+  btn.disabled = true;
+  btn.textContent = "发送中…";
+  setResult(personaId, "正在发送测试消息…", "");
+  try {
+    const result = await callPost("/test-send", { persona_id: personaId });
+    await load();
+    setResult(personaId, `已送达（${result.delivery}）：${result.text}`, "ok");
+  } catch (err) {
+    setResult(personaId, err.message || String(err), "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "测试发送";
+  }
+}
+
+function showError(message) {
+  const box = document.getElementById("error");
+  box.innerHTML = message ? `<div class="error">${esc(message)}</div>` : "";
+}
+
+let bridgeRetries = 0;
+
+async function load() {
+  try {
+    const data = await callGet("/state");
+    showError(data.config_error || "");
+    render(data);
+    bridgeRetries = 0;
+  } catch (err) {
+    const text = err && err.message ? err.message : String(err);
+    showError(text);
+    document.getElementById("grid").innerHTML = "";
+    // A slow host may inject the bridge after the first attempt.
+    if (/页面桥接/.test(text) && bridgeRetries < 5) {
+      bridgeRetries += 1;
+      setTimeout(() => void load(), 800 * bridgeRetries);
+    }
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", () => void load());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (timer) { clearInterval(timer); timer = null; }
+  } else if (!timer) {
+    timer = setInterval(() => void load(), 15000);
+    void load();
+  }
+});
+timer = setInterval(() => void load(), 15000);
+void load();
+</script>
+</body>
+</html>

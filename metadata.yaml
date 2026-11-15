@@ -1,0 +1,12 @@
+name: astrbot_plugin_matrix_companion
+display_name: 生活陪伴（精简）
+author: local
+description: 只保留「生活模拟 + 主动消息」的精简陪伴插件。按 AstrBot 人格 ID 隔离各自的状态、日程、主动队列与审计，按配置把每个人格绑定到任意平台实例与投递会话，Matrix 优先。
+desc: 生活模拟 + 主动消息，按人格隔离，平台无关。
+version: 0.1.0
+astrbot_version: ">=4.16.0"
+support_platforms:
+  - matrix
+pages:
+  - name: companion-panel
+    title: 生活面板

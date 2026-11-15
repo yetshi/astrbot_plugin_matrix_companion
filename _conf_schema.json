@@ -1,0 +1,63 @@
+{
+  "persona_targets": {
+    "description": "人格投递配置",
+    "type": "text",
+    "hint": "每行一个人格，格式：人格ID = 平台实例ID:会话类型:会话ID。人格ID 填 AstrBot 里的人格名；平台实例ID 填 AstrBot 平台配置里的实例 ID（Matrix 默认是 matrix）；会话类型填 FriendMessage（私聊）或 GroupMessage（群聊）。示例：\n阿星 = matrix:FriendMessage:@alice:matrix.org\n小满 = matrix:FriendMessage:@bob:matrix.org\n改这一行就能换账号或换实例，该人格已有的生活状态不会丢。",
+    "default": ""
+  },
+  "enable_proactive": {
+    "description": "启用主动消息",
+    "type": "bool",
+    "hint": "关闭后只做生活模拟，不会主动发消息。",
+    "default": true
+  },
+  "enable_life_sim": {
+    "description": "启用生活模拟",
+    "type": "bool",
+    "hint": "开启后每个人格每天生成自己的状态和日程，并随时间推进；关闭后主动消息只依据人格设定说话。",
+    "default": true
+  },
+  "plan_time": {
+    "description": "每日生成时间",
+    "type": "string",
+    "hint": "每天几点生成当天的状态和日程，格式 HH:MM，例如 07:30。错过会在下一次调度补生成。",
+    "default": "07:30"
+  },
+  "proactive_min_interval_minutes": {
+    "description": "主动最小间隔（分钟）",
+    "type": "int",
+    "hint": "同一个人格两次主动消息之间至少隔多久。",
+    "default": 90
+  },
+  "proactive_daily_limit": {
+    "description": "每日主动上限",
+    "type": "int",
+    "hint": "每个人格每天最多主动发几条。",
+    "default": 6
+  },
+  "quiet_hours": {
+    "description": "免打扰时段",
+    "type": "string",
+    "hint": "格式 HH:MM-HH:MM，跨零点也可以，例如 23:30-07:30。留空表示不设免打扰。",
+    "default": "23:30-07:30"
+  },
+  "tick_minutes": {
+    "description": "调度间隔（分钟）",
+    "type": "int",
+    "hint": "后台多久检查一次。生活推进、到期生成和主动判断都在这个周期里执行。默认 10 分钟。",
+    "default": 10
+  },
+  "llm_provider_id": {
+    "description": "指定模型（留空用默认）",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "生活模拟和主动消息使用的模型。留空则使用 AstrBot 当前默认会话模型。",
+    "default": ""
+  },
+  "recent_user_window_minutes": {
+    "description": "用户刚说话的静默期（分钟）",
+    "type": "int",
+    "hint": "用户最近这么多分钟内在私聊里说过话时，不打断，跳过本轮主动。",
+    "default": 15
+  }
+}
