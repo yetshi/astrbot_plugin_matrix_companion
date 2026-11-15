@@ -87,6 +87,8 @@ def empty_state(persona_id: str) -> dict[str, Any]:
             "sleeping_since": 0.0,
             "away": "",
             "away_since": 0.0,
+            "place": "",
+            "place_updated_at": 0.0,
             "last_text": "",
             "updated_at": 0.0,
         },

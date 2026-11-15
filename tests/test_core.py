@@ -910,3 +910,58 @@ def test_overview_payload_includes_usage_and_interval() -> None:
     assert payload["usage"]["today_total"]["calls"] == 4
     assert payload["min_interval_minutes"] == 90
     assert payload["daily_limit"] == 6
+
+# ── user place ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("我在公司", "公司"),
+        ("我在家", "家"),
+        ("我到家了", "家"),
+        ("我在路上", "路上"),
+        ("我在图书馆看书", "图书馆"),
+        ("我去健身房了", "健身房"),
+        ("我在开会", None),
+        ("我喜欢家", None),
+        ("今天好累", None),
+    ],
+)
+def test_detect_place(text: str, expected: str | None) -> None:
+    assert user_mod.detect_place(text) == expected
+
+
+def test_apply_place_and_freshness() -> None:
+    now = datetime(2026, 1, 1, 12, 0)
+    user: dict = {}
+    user_mod.apply_place(user, "公司", now)
+    assert user["place"] == "公司"
+    assert user["place_updated_at"] == now.timestamp()
+    assert user_mod.current_place(user, now) == "公司"
+    assert user_mod.current_place(user, datetime(2026, 1, 2, 0, 0)) == ""
+
+
+def test_user_summary_includes_place() -> None:
+    now = datetime(2026, 1, 1, 12, 0)
+    user = {"last_text": "我在公司", "place": "公司", "place_updated_at": now.timestamp()}
+    summary = user_mod.user_summary(user, now)
+    assert "对方可能在：公司" in summary
+
+
+def test_persona_snapshot_includes_user_place() -> None:
+    now = datetime(2026, 1, 1, 12, 0)
+    state = store_mod.empty_state("A")
+    state["user"] = {
+        "last_text": "我在公司",
+        "place": "公司",
+        "place_updated_at": now.timestamp(),
+    }
+    card = panel_mod.persona_snapshot(
+        "A",
+        cfg.Target("A", "matrix", "FriendMessage", "@a:server"),
+        state,
+        _panel_settings(),
+        now,
+    )
+    assert card["user"]["place"] == "公司"

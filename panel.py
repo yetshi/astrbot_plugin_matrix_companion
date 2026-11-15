@@ -11,7 +11,7 @@ from typing import Any
 
 from .config import Settings, Target
 from .life import advance_state, current_segment
-from .user_state import is_user_sleeping, user_summary
+from .user_state import current_place, is_user_sleeping, user_summary
 
 GATE_LABELS = {
     None: "可以发送",
@@ -133,6 +133,7 @@ def persona_snapshot(
             "last_text": str(user.get("last_text") or ""),
             "sleeping": is_user_sleeping(user, now),
             "away": str(user.get("away") or ""),
+            "place": current_place(user, now),
             "note": user_summary(user, now),
         },
         "gate": gate,

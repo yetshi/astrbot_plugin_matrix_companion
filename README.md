@@ -188,6 +188,8 @@ data/plugin_data/astrbot_plugin_matrix_companion/personas/<人格>.json
   四阶段状态机、闸门与提示词方案、落地顺序（阶段 0 已完成）
 - [日程、事件量级与状态归属](docs/SCHEDULE_EVENT_DESIGN.md)：为什么小事件会引发大改写、
   三层影响半径、状态与地点当前记在谁身上、待做阶段
+- [对话人画像](docs/USER_PROFILE_DESIGN.md)：记录范围（含健康、价值，不含政治/宗教/收入）、
+  防幻觉的白名单校验、注入方式、落地阶段
 
 ## 安装
 
@@ -200,7 +202,7 @@ data/plugin_data/astrbot_plugin_matrix_companion/personas/<人格>.json
 | --- | --- |
 | 生成方式 | AI 生成，人负责提需求、定行为、跑起来验证并反馈问题 |
 | 代码来源 | 按 `astrbot_plugin_private_companion` 的设计思路**重新写的**，没有复制它的源码 |
-| 测试 | 101 个不依赖 AstrBot 运行时的单元测试；投递、主动、面板在 Matrix 上人工验证过 |
+| 测试 | 113 个不依赖 AstrBot 运行时的单元测试；投递、主动、面板在 Matrix 上人工验证过 |
 | 已知边界 | 关键词规则偏保守；生活模拟只有一天，跨天只带一句摘要；没有长期记忆 |
 | 维护承诺 | 没有。这是一个自用插件，接口随 AstrBot 版本可能失效 |
 

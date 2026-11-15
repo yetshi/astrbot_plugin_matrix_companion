@@ -45,7 +45,14 @@ from .store import (
     now_iso,
     record_usage,
 )
-from .user_state import apply_cue, detect_cue, is_user_sleeping, user_summary
+from .user_state import (
+    apply_cue,
+    apply_place,
+    detect_cue,
+    detect_place,
+    is_user_sleeping,
+    user_summary,
+)
 
 PLUGIN_NAME = "astrbot_plugin_matrix_companion"
 GENERATION_RETRY_SECONDS = 1800
@@ -157,7 +164,13 @@ class MatrixCompanionPlugin(Star):
         user_state = state.setdefault("user", {})
         if sender_id:
             user_state["user_id"] = sender_id
-        apply_cue(user_state, detect_cue(text), text, now)
+        cue = detect_cue(text)
+        apply_cue(user_state, cue, text, now)
+        place = detect_place(text)
+        if place:
+            apply_place(user_state, place, now)
+        elif cue.kind == "away":
+            apply_place(user_state, "外面", now)
         append_pending_chat(
             state.setdefault("life", {}), f"对方：{text}", now.timestamp()
         )

@@ -275,6 +275,7 @@ function userRow(user) {
   if (!user) return "";
   const tags = [];
   if (user.sleeping) tags.push('<span class="tag bad">对方说去睡了</span>');
+  if (user.place) tags.push(`<span class="tag ok">在 ${esc(user.place)}</span>`);
   if (user.away) tags.push(`<span class="tag">在外：${esc(user.away)}</span>`);
   if (!user.last_text && !tags.length) return "";
   const last = user.last_text ? `<span>${esc(user.last_text)}</span>` : "";
