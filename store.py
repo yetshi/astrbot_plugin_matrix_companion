@@ -91,6 +91,24 @@ def empty_state(persona_id: str) -> dict[str, Any]:
             "place_updated_at": 0.0,
             "last_text": "",
             "updated_at": 0.0,
+            # Stable facts the user stated about themselves. Only written when
+            # explicit; see docs/USER_PROFILE_DESIGN.md.
+            "profile": {
+                "display_name": "",
+                "address_as": "",
+                "city": "",
+                "timezone": "",
+                "occupation": "",
+                "usual_sleep": "",
+                "interests": [],
+                "values": [],
+                "dislikes": [],
+                "important_dates": [],
+                "health": [],
+                "notes": "",
+                "updated_at": 0.0,
+            },
+            "observations": [],
         },
         "audit": [],
     }

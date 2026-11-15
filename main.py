@@ -48,6 +48,7 @@ from .store import (
 from .user_state import (
     apply_cue,
     apply_place,
+    apply_profile_updates,
     detect_cue,
     detect_place,
     is_user_sleeping,
@@ -411,7 +412,11 @@ class MatrixCompanionPlugin(Star):
             life["pending_chat"] = []
             return False
         system, user = reconcile_prompt(
-            self._persona_prompt(persona_id), life, lines, now
+            self._persona_prompt(persona_id),
+            life,
+            lines,
+            now,
+            user_note=user_summary(state.get("user"), now),
         )
         try:
             raw = await self._call_llm(system, user, task="reconcile", state=state)
@@ -425,6 +430,15 @@ class MatrixCompanionPlugin(Star):
             self._audit(state, "life_reconcile_failed", now=now)
             return False
         apply_reconcile(life, patch, now)
+        profile_updates = patch.get("profile_updates") or []
+        if profile_updates:
+            result = apply_profile_updates(
+                state.setdefault("user", {}), profile_updates, now
+            )
+            for key in result.get("applied", []):
+                self._audit(state, "profile_updated", now=now, key=key)
+            for key, reason in result.get("rejected", []):
+                self._audit(state, "profile_rejected", now=now, key=key, reason=reason)
         self._audit(
             state,
             "life_reconciled",

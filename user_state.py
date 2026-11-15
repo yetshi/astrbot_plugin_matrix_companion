@@ -243,6 +243,225 @@ def current_place(
     return place
 
 
+PROFILE_SCALAR_FIELDS = frozenset(
+    {
+        "display_name",
+        "address_as",
+        "city",
+        "timezone",
+        "occupation",
+        "usual_sleep",
+        "notes",
+    }
+)
+PROFILE_LIST_FIELDS = frozenset({"interests", "values", "dislikes"})
+PROFILE_DATED_FIELDS = frozenset({"important_dates", "health"})
+# Never stored, even when the user says them.
+PROFILE_FORBIDDEN = frozenset(
+    {
+        "politics",
+        "political",
+        "religion",
+        "religious",
+        "faith",
+        "income",
+        "salary",
+        "money",
+        "finance",
+        "wealth",
+        "address_detail",
+        "home_address",
+        "id_card",
+        "bank",
+        "password",
+    }
+)
+PROFILE_LIST_LIMIT = 20
+HEALTH_KEYWORDS = (
+    "感冒",
+    "发烧",
+    "咳嗽",
+    "头疼",
+    "头痛",
+    "胃",
+    "疼",
+    "难受",
+    "不舒服",
+    "医院",
+    "药",
+    "睡不好",
+    "失眠",
+    "过敏",
+    "受伤",
+    "月经",
+    "姨妈",
+    "生理期",
+)
+HEALTH_TTL_DAYS = 14
+HEALTH_FRESH_HOURS = 48
+
+
+def _ensure_profile(user: dict[str, Any]) -> dict[str, Any]:
+    profile = user.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+        user["profile"] = profile
+    for key in PROFILE_SCALAR_FIELDS:
+        profile.setdefault(key, "")
+    for key in PROFILE_LIST_FIELDS:
+        profile.setdefault(key, [])
+    for key in PROFILE_DATED_FIELDS:
+        profile.setdefault(key, [])
+    profile.setdefault("updated_at", 0.0)
+    return profile
+
+
+def _health_started(entry: dict[str, Any]) -> datetime | None:
+    raw = str(entry.get("since") or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def health_note(user: Any, now: datetime) -> str:
+    """Describe the user's ongoing health only when it is relevant.
+
+    A steady-state condition older than the fresh window is never injected
+    unless the user just brought it up, so the character cannot ask
+    "feeling better?" out of nowhere.
+
+    Args:
+        user: The persona's ``user`` mapping.
+        now: Current local time.
+
+    Returns:
+        A prompt line, or ``""`` when nothing relevant is known.
+    """
+    if not isinstance(user, dict):
+        return ""
+    profile = user.get("profile") if isinstance(user.get("profile"), dict) else {}
+    entries = profile.get("health") if isinstance(profile.get("health"), list) else []
+    active: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("status") != "ongoing":
+            continue
+        started = _health_started(entry)
+        if started is not None and (now - started).days > HEALTH_TTL_DAYS:
+            continue
+        active.append(entry)
+    if not active:
+        return ""
+    last_text = str(user.get("last_text") or "")
+    relevant = any(token in last_text for token in HEALTH_KEYWORDS)
+    newest = active[-1]
+    text = str(newest.get("text") or "").strip()
+    since = str(newest.get("since") or "").strip()
+    if not text:
+        return ""
+    if relevant:
+        return f"对方最近{text}（{since}），可以顺带问一句好点没有。"
+    started = _health_started(newest)
+    if (
+        started is not None
+        and (now - started).total_seconds() <= HEALTH_FRESH_HOURS * 3600
+    ):
+        return f"对方最近{text}（{since}）。只有话题相关时才关心，不要无缘无故提。"
+    return ""
+
+
+def apply_profile_updates(
+    user: dict[str, Any],
+    updates: Any,
+    now: datetime,
+    *,
+    list_limit: int = PROFILE_LIST_LIMIT,
+) -> dict[str, list]:
+    """Validate and apply model-proposed profile facts.
+
+    Args:
+        user: The persona's ``user`` mapping, mutated in place.
+        updates: List of ``{"key", "value", "source"}`` mappings.
+        now: Current local time.
+        list_limit: Maximum entries per list field.
+
+    Returns:
+        ``{"applied": [key, ...], "rejected": [(key, reason), ...]}``.
+    """
+    profile = _ensure_profile(user)
+    applied: list[str] = []
+    rejected: list[tuple[str, str]] = []
+    for item in updates or []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip().lower()
+        value = str(item.get("value") or "").strip()
+        source = str(item.get("source") or "").strip()
+        if not key:
+            continue
+        if key in PROFILE_FORBIDDEN:
+            rejected.append((key, "forbidden"))
+            continue
+        if not value:
+            rejected.append((key, "empty"))
+            continue
+        if not source:
+            rejected.append((key, "no_source"))
+            continue
+
+        if key in PROFILE_SCALAR_FIELDS:
+            profile[key] = value[:80]
+        elif key in PROFILE_LIST_FIELDS:
+            items = profile.get(key) if isinstance(profile.get(key), list) else []
+            trimmed = value[:60]
+            if trimmed not in items:
+                items.append(trimmed)
+                profile[key] = items[-list_limit:]
+        elif key in PROFILE_DATED_FIELDS:
+            entries = profile.get(key) if isinstance(profile.get(key), list) else []
+            trimmed = value[:60]
+            existing = next(
+                (
+                    entry
+                    for entry in entries
+                    if isinstance(entry, dict) and entry.get("text") == trimmed
+                ),
+                None,
+            )
+            if key == "health":
+                if existing is None:
+                    entries.append(
+                        {
+                            "text": trimmed,
+                            "since": now.date().isoformat(),
+                            "status": "ongoing",
+                            "source": source[:120],
+                        }
+                    )
+                else:
+                    existing["status"] = "ongoing"
+                    existing["source"] = source[:120]
+            elif existing is None:
+                entries.append(
+                    {
+                        "text": trimmed,
+                        "source": source[:120],
+                        "added_at": now.timestamp(),
+                    }
+                )
+            profile[key] = entries[-list_limit:]
+        else:
+            rejected.append((key, "unknown_key"))
+            continue
+        applied.append(key)
+
+    if applied:
+        profile["updated_at"] = now.timestamp()
+    return {"applied": applied, "rejected": rejected}
+
+
 def is_user_sleeping(
     user: Any, now: datetime, *, timeout_hours: float = SLEEPING_TIMEOUT_HOURS
 ) -> bool:
@@ -280,6 +499,40 @@ def user_summary(user: Any, now: datetime) -> str:
     last_text = str(user.get("last_text") or "").strip()
     if last_text:
         parts.append(f"对方最后说：{last_text[:80]}")
+
+    profile = user.get("profile") if isinstance(user.get("profile"), dict) else {}
+    name = str(profile.get("address_as") or profile.get("display_name") or "").strip()
+    if name:
+        parts.append(f"对方希望你称他：{name[:20]}")
+    facts: list[str] = []
+    for key, label in (
+        ("city", "城市"),
+        ("usual_sleep", "作息"),
+        ("occupation", "职业"),
+    ):
+        value = str(profile.get(key) or "").strip()
+        if value:
+            facts.append(f"{label}：{value[:30]}")
+    if facts:
+        parts.append("；".join(facts))
+    values = [
+        str(item).strip()[:40]
+        for item in (profile.get("values") or [])
+        if str(item).strip()
+    ][:2]
+    if values:
+        parts.append("在意：" + "、".join(values))
+    dislikes = [
+        str(item).strip()[:40]
+        for item in (profile.get("dislikes") or [])
+        if str(item).strip()
+    ][:2]
+    if dislikes:
+        parts.append("不喜欢：" + "、".join(dislikes))
+    health = health_note(user, now)
+    if health:
+        parts.append(health.rstrip("。"))
+
     if is_user_sleeping(user, now):
         parts.append("对方说过去睡了，可能还在睡")
     away = str(user.get("away") or "").strip()

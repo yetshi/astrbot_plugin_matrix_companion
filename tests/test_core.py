@@ -965,3 +965,125 @@ def test_persona_snapshot_includes_user_place() -> None:
         now,
     )
     assert card["user"]["place"] == "公司"
+
+# ── user profile ─────────────────────────────────────────────────────────
+
+
+def test_apply_profile_updates_accepts_valid_facts() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    result = user_mod.apply_profile_updates(
+        user,
+        [
+            {"key": "address_as", "value": "小满", "source": "叫我小满就行"},
+            {"key": "interests", "value": "练吉他", "source": "最近在练吉他"},
+        ],
+        now,
+    )
+    assert result["applied"] == ["address_as", "interests"]
+    assert user["profile"]["address_as"] == "小满"
+    assert user["profile"]["interests"] == ["练吉他"]
+    assert user["profile"]["updated_at"] == now.timestamp()
+
+
+def test_apply_profile_updates_rejects_bad_entries() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    result = user_mod.apply_profile_updates(
+        user,
+        [
+            {"key": "politics", "value": "不关心", "source": "我支持…"},
+            {"key": "city", "value": "杭州"},
+            {"key": "occupation", "value": "", "source": "我是做设计的"},
+            {"key": "whatever", "value": "x", "source": "x"},
+        ],
+        now,
+    )
+    reasons = dict(result["rejected"])
+    assert reasons["politics"] == "forbidden"
+    assert reasons["city"] == "no_source"
+    assert reasons["occupation"] == "empty"
+    assert reasons["whatever"] == "unknown_key"
+    assert result["applied"] == []
+
+
+def test_apply_profile_updates_dedupes_lists() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    user_mod.apply_profile_updates(
+        user, [{"key": "interests", "value": "练吉他", "source": "在练吉他"}], now
+    )
+    user_mod.apply_profile_updates(
+        user, [{"key": "interests", "value": "练吉他", "source": "还在练吉他"}], now
+    )
+    assert user["profile"]["interests"] == ["练吉他"]
+
+
+def test_apply_profile_updates_health_entry() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    user_mod.apply_profile_updates(
+        user, [{"key": "health", "value": "感冒", "source": "我感冒了"}], now
+    )
+    user_mod.apply_profile_updates(
+        user, [{"key": "health", "value": "感冒", "source": "还没好"}], now
+    )
+    entries = user["profile"]["health"]
+    assert len(entries) == 1
+    assert entries[0]["status"] == "ongoing"
+    assert entries[0]["since"] == "2026-01-02"
+
+
+def test_health_note_only_when_relevant_or_fresh() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    user_mod.apply_profile_updates(
+        user, [{"key": "health", "value": "感冒", "source": "我感冒了"}], now
+    )
+
+    user["last_text"] = "今天天气不错"
+    assert "不要无缘无故提" in user_mod.health_note(user, now)
+
+    user["last_text"] = "我还在感冒"
+    assert "好点没有" in user_mod.health_note(user, now)
+
+    old = datetime(2025, 11, 1, 12, 0)
+    stale = store_mod.empty_state("B")["user"]
+    user_mod.apply_profile_updates(
+        stale, [{"key": "health", "value": "感冒", "source": "我感冒了"}], old
+    )
+    stale["last_text"] = "今天天气不错"
+    assert user_mod.health_note(stale, now) == ""
+
+
+def test_user_summary_includes_profile() -> None:
+    now = datetime(2026, 1, 2, 12, 0)
+    user = store_mod.empty_state("A")["user"]
+    user_mod.apply_profile_updates(
+        user,
+        [
+            {"key": "address_as", "value": "小满", "source": "叫我小满"},
+            {"key": "city", "value": "杭州", "source": "我在杭州"},
+            {"key": "values", "value": "先照顾好自己", "source": "我觉得人得先照顾好自己"},
+        ],
+        now,
+    )
+    summary = user_mod.user_summary(user, now)
+    assert "小满" in summary
+    assert "杭州" in summary
+    assert "先照顾好自己" in summary
+
+
+def test_parse_reconcile_payload_parses_profile_updates() -> None:
+    raw = (
+        '{"profile_updates":['
+        '{"key":"address_as","value":"小满","source":"叫我小满就行"},'
+        '{"key":"city","value":"杭州"},'
+        '{"key":"interests","value":"吉他","source":"在练吉他"}'
+        "]}"
+    )
+    patch = life_mod.parse_reconcile_payload(raw)
+    assert patch is not None
+    updates = patch["profile_updates"]
+    # 缺 source 的条目在解析阶段就丢掉
+    assert [item["key"] for item in updates] == ["address_as", "interests"]

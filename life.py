@@ -350,6 +350,7 @@ RECONCILE_SYSTEM_RULES = """你正在过自己的生活，刚刚和对方聊过�
 - status：一句话，第三人称，说明你现在在做什么、刚发生了什么，最多 60 字
 - log：一行，记录这次互动里实际发生的事，最多 40 字；没有值得记的就留空
 - plan_changes：可选，只有日程确实需要变化时才输出
+- profile_updates：可选，只有对方明确说出关于自己的长期事实时才输出
 
 关于 plan_changes：
 1. 只有对方明确约定了具体的共同活动时才输出，例如「下午一起看书」
@@ -359,7 +360,17 @@ RECONCILE_SYSTEM_RULES = """你正在过自己的生活，刚刚和对方聊过�
 4. 只输出**发生变化**的条目。上面已经列出你接下来的安排，没有被这次对话影响的部分
    不要重写、不要补抄，保持原样。
 5. 新条目和原有安排时间重叠时会替换那一段，其余自动保留。
-6. 每项含 start、end、activity、place。"""
+6. 每项含 start、end、activity、place。
+
+关于 profile_updates：
+格式为 [{"key": 字段名, "value": 内容, "source": 对方原话}]。
+可用字段：display_name、address_as、city、timezone、occupation、usual_sleep、
+interests、values、dislikes、important_dates、health、notes。
+1. 必须带 source（对方的原话片段）；没有原话就不要写。
+2. 不要推断、不要补全，宁可漏记。
+3. 健康只在对方明确说身体不适时记录；不诊断、不建议用药、不判断严重程度。
+4. 禁止记录政治立场、宗教信仰、收入财务、证件账号密码。
+5. 一次最多 3 条；普通闲聊通常不需要。"""
 
 
 def reconcile_prompt(
@@ -367,6 +378,8 @@ def reconcile_prompt(
     life: dict[str, Any],
     chat_lines: list[str],
     now: datetime,
+    *,
+    user_note: str = "",
 ) -> tuple[str, str]:
     """Build the prompts that fold a conversation back into the life state.
 
@@ -375,6 +388,7 @@ def reconcile_prompt(
         life: The persona's current life state.
         chat_lines: Recent conversation lines, oldest first.
         now: Current local time.
+        user_note: What is already known about the user.
 
     Returns:
         ``(system_prompt, user_prompt)``.
@@ -382,15 +396,17 @@ def reconcile_prompt(
     head = persona_prompt.strip()
     system = f"{head}\n\n{RECONCILE_SYSTEM_RULES}" if head else RECONCILE_SYSTEM_RULES
     dialogue = "\n".join(f"- {line}" for line in chat_lines if str(line).strip())
-    user = "\n".join(
+    blocks = [life_summary(life, now, upcoming_limit=12)]
+    if user_note:
+        blocks.append(f"已知的对方情况：{user_note}")
+    blocks.extend(
         [
-            life_summary(life, now, upcoming_limit=12),
             "刚刚的对话：",
             dialogue or "- （无）",
             "请更新状态；日程只写发生变化的条目。",
         ]
     )
-    return system, user
+    return system, "\n".join(blocks)
 
 
 def parse_reconcile_payload(text: str) -> dict[str, Any] | None:
@@ -432,6 +448,21 @@ def parse_reconcile_payload(text: str) -> dict[str, Any] | None:
     )
     if changes:
         patch["plan_changes"] = changes
+
+    raw_profile = payload.get("profile_updates")
+    if isinstance(raw_profile, list):
+        updates: list[dict[str, str]] = []
+        for item in raw_profile[:5]:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip().lower()
+            value = str(item.get("value") or "").strip()
+            source = str(item.get("source") or "").strip()
+            if not key or not value or not source:
+                continue
+            updates.append({"key": key, "value": value[:80], "source": source[:120]})
+        if updates:
+            patch["profile_updates"] = updates
     return patch or None
 
 
